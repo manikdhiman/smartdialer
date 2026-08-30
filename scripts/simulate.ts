@@ -15,7 +15,6 @@ class SimProvider implements TelecomProvider {
 
   constructor(answerRate: number, avgTalkTimeSec: number, setupTimeSec = 2) {
     this.answerRate = answerRate;
-    // Scale talk time: 10s talk time = 50ms sim time (allows turnover across a 15-tick run)
     this.talkTimeMs = Math.min(120, avgTalkTimeSec * 1.5);
     this.setupTimeMs = setupTimeSec * 5;
   }
@@ -96,6 +95,7 @@ interface ScenarioResult {
   connected: number;
   utilizationPct: string;
   pacingDecisions: string;
+  safetyDecisions: string;
   ratio: string;
 }
 
@@ -130,6 +130,7 @@ async function runScenario(
 
   let totalProposed = 0;
   let totalAllocated = 0;
+  const decisionsCount: Record<string, number> = { APPROVE: 0, REDUCE: 0, REJECT: 0, FALLBACK_PROGRESSIVE: 0 };
 
   for (let tick = 1; tick <= ticks; tick++) {
     if (midRunShift && tick === midRunShift.atTick) {
@@ -139,6 +140,10 @@ async function runScenario(
     const res = await worker.runTick();
     totalProposed += res.proposed;
     totalAllocated += res.allocated;
+
+    const rawDecisionType = res.safetyDecision.split(' ')[0];
+    decisionsCount[rawDecisionType] = (decisionsCount[rawDecisionType] || 0) + 1;
+
     await new Promise((r) => setTimeout(r, 70));
   }
 
@@ -148,13 +153,19 @@ async function runScenario(
   const util = ((activeAgents / totalAgents) * 100).toFixed(1);
   const ratio = (totalProposed / Math.max(1, totalAllocated)).toFixed(2) + 'x';
 
+  const safetySummary = Object.entries(decisionsCount)
+    .filter(([_, count]) => count > 0)
+    .map(([type, count]) => `${type}: ${count}`)
+    .join(', ');
+
   return {
     scenario: name,
     answerRate: `${(initialAR * 100).toFixed(0)}%` + (midRunShift ? ` -> ${(midRunShift.newAR * 100).toFixed(0)}%` : ''),
     totalDialed: Number(dialedCount.count),
     connected: Number(connectedCount.count),
     utilizationPct: `${util}%`,
-    pacingDecisions: `Proposed: ${totalProposed}, Allocated: ${totalAllocated}`,
+    pacingDecisions: `Prop: ${totalProposed}, Alloc: ${totalAllocated}`,
+    safetyDecisions: safetySummary,
     ratio,
   };
 }

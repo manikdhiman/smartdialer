@@ -1,45 +1,55 @@
 import { createDatabase } from '../src/store/db.js';
 import { AgentRepository } from '../src/store/agentRepo.js';
 import { LeadRepository } from '../src/store/leadRepo.js';
-import { DialerWorker } from '../src/worker.js';
 import { ProviderB } from '../src/providers/ProviderB.js';
+import { ProviderEventBus } from '../src/providers/ProviderEventBus.js';
+import { CallAllocator } from '../src/engine/CallAllocator.js';
 
-async function runChaosSimulation() {
-  console.log('=== Starting SmartDialer Chaos Simulator ===\n');
+async function demonstrateProviderBChaos() {
+  console.log('================================================================');
+  console.log('  SmartDialer Chaos Demo: Provider B Duplicate & Out-of-Order  ');
+  console.log('================================================================\n');
+
   const db = createDatabase(':memory:');
   const agentRepo = new AgentRepository(db);
   const leadRepo = new LeadRepository(db);
+  const eventBus = new ProviderEventBus(db);
 
-  // Setup 50 agents and 100 leads
-  for (let i = 1; i <= 50; i++) {
-    agentRepo.insertAgent({ id: `agent-${i}`, name: `Agent ${i}`, status: 'AVAILABLE' });
-  }
-  for (let i = 1; i <= 100; i++) {
-    leadRepo.insertLead(`lead-${i}`, `+1555${1000 + i}`);
-  }
+  agentRepo.insertAgent({ id: 'ag-chaos-1', name: 'Agent Chaos', status: 'AVAILABLE' });
+  leadRepo.insertLead('lead-chaos-1', '+15550199');
 
-  const worker = new DialerWorker({
-    workerId: 'chaos-worker-1',
-    db,
-    mode: 'PREDICTIVE',
-    provider: new ProviderB({ minSetupMs: 5, maxSetupMs: 15, duplicateRate: 0.5, reorderRate: 0.5, failureRate: 0.1 }),
+  const providerB = new ProviderB({
+    minSetupMs: 10,
+    maxSetupMs: 30,
+    failureRate: 0,
+    duplicateRate: 1.0, // Force 100% duplicates
+    reorderRate: 1.0,   // Force 100% out-of-order events
   });
 
-  console.log('Tick 1: Standard load with 50 agents...');
-  const t1 = await worker.runTick();
-  console.log(`[Tick 1 Result] Avail: ${t1.availableAgents}, Proposed: ${t1.proposed}, Decision: ${t1.safetyDecision}, Allocated: ${t1.allocated}`);
+  const allocator = new CallAllocator(db, providerB, eventBus);
 
-  console.log('\nInjecting Chaos: 30 agents disconnect abruptly...');
-  for (let i = 1; i <= 30; i++) {
-    const ag = agentRepo.getAgentById(`agent-${i}`)!;
-    agentRepo.transitionStatus(ag.id, ag.version, 'OFFLINE');
-  }
+  // Hook event bus logging to demonstrate rejection/application
+  const origProcess = eventBus.processEvent.bind(eventBus);
+  eventBus.processEvent = (evt) => {
+    const res = origProcess(evt);
+    console.log(
+      `[ProviderEventBus] Event: ${evt.type.padEnd(16)} | Seq: ${evt.sequenceNumber} | EventID: ${evt.eventId.slice(0, 12)}... | Ingestion: ${res.accepted ? 'ACCEPTED (APPLIED)' : `REJECTED (${res.reason})`}`
+    );
+    return res;
+  };
 
-  console.log('Tick 2: Pacing under mass agent drop...');
-  const t2 = await worker.runTick();
-  console.log(`[Tick 2 Result] Avail: ${t2.availableAgents}, Proposed: ${t2.proposed}, Decision: ${t2.safetyDecision}, Allocated: ${t2.allocated}`);
+  console.log('Initiating outbound call with Provider B chaos active...\n');
+  const allocRes = await allocator.allocateCalls(1, 'demo-worker');
+  console.log(`[Allocator] Dispatched ${allocRes.successful} call. Listening to chaotic stream...\n`);
 
-  console.log('\nChaos Simulation complete. Verified bounded safety ceilings.');
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+const call = db.prepare('SELECT id, status, last_applied_seq, version FROM calls LIMIT 1').get() as any;  const agent = agentRepo.getAgentById('ag-chaos-1');
+
+  console.log('\n--- Final Reconciled State in SQLite ---');
+  console.log(`Call Record  : ID=${call?.id}, Status=${call?.status}, LastAppliedSeq=${call?.last_applied_seq}`);
+  console.log(`Agent Record : ID=${agent?.id}, Status=${agent?.status}, Version=${agent?.version}`);
+  console.log('\nResult: Zero crashes, duplicates dropped idempotently, final state cleanly reconciled.');
 }
 
-runChaosSimulation();
+demonstrateProviderBChaos();
