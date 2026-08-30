@@ -56,3 +56,124 @@ smartdialer/
 │   ├── loadtest.ts              # Scale benchmark (100 -> 10,000 agents)
 │   └── chaos.ts                 # CLI chaos injector
 └── test/                        # 8 test suites covering 29 unit, race & chaos tests
+
+4) Failure Scenarios Coverage
+
+All five failure scenarios specified in the brief have dedicated, isolated test suites and runnable chaos demonstrations:
+
+## Failure Scenarios Coverage
+
+Each scenario from the assignment brief is demonstrated with a dedicated test and/or a live chaos run.
+
+---
+
+### 1. Worker Crash Mid-Allocation
+**Scenario:** Agent reserved → lead reserved → call initiated → worker crashes.
+**Demonstrates:** Stale reservations don't leak forever.
+**Where to look:** `test/chaos.test.ts` → *Scenario 1*
+**Result:** The reservation TTL reaper releases the agent back to `AVAILABLE` within the 20ms TTL window.
+
+---
+
+### 2. Telecom Provider Outage
+**Scenario:** Provider error rate spikes sharply.
+**Demonstrates:** Existing calls, new calls, and pacing all back off correctly under a failing provider.
+**Where to look:** `test/chaos.test.ts` → *Scenario 2*
+**Result:** `ProviderHealthMonitor` trips its circuit breaker above a 50% error rate and clamps new outbound dials to 0.
+
+---
+
+### 3. Mass Agent Drop (100 → 40)
+**Scenario:** 60 agents disconnect abruptly within a few seconds.
+**Demonstrates:** The Safety Controller reacts in real time, not on a delay.
+**Where to look:** `test/chaos.test.ts` → *Scenario 3*
+**Result:** The concurrent-call ceiling contracts from 101 → 41 on the very next pacing tick.
+
+---
+
+### 4. Duplicate Provider Events
+**Scenario:** The same webhook event is delivered more than once.
+**Demonstrates:** No event gets processed twice, no matter how many times it arrives.
+**Where to look:** `test/chaos.test.ts` → *Scenarios 4–5*, also runnable live via `npm run chaos`
+**Result:** The `processed_events` table rejects the repeated `event_id`; the call's state transitions exactly once.
+
+---
+
+### 5. Out-of-Order Events
+**Scenario:** e.g. `CALL_ANSWERED` arrives before a delayed `CALL_RINGING`.
+**Demonstrates:** The system never crashes or corrupts state when events arrive in the wrong order.
+**Where to look:** `test/chaos.test.ts` → *Scenarios 4–5*, also runnable live via `npm run chaos`
+**Result:** The `last_applied_seq` monotonic guard silently drops the stale event; no exception, final state stays correct.
+
+---
+
+> **Live demo:** run `npm run chaos` to watch Provider B's duplicate and out-of-order events get
+> ingested in real time — each line prints `APPLIED`, `REJECTED — DUPLICATE`, or
+> `REJECTED — OUT_OF_ORDER` as it happens.
+
+5) Quickstart & Commands
+
+    Prerequisites
+    Node.js >= 22.0.0
+    npm >= 10.0.0
+
+    # Run All 29 Unit & Chaos Tests
+    npm test
+
+    # Run Simulation Across Scenarios A–D
+    npm run simulate
+
+    # Run Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
+    npm run loadtest
+
+    # Run Live Provider B Chaos Demonstration
+    npm run chaos
+
+6) Simulation & Benchmark Results
+
+    Scenarios A–D Simulation Output
+
+    ┌─────────┬──────────────────────────────┬──────────────┬─────────────┬───────────┬────────────────┬─────────────────────────┬─────────────────────────────────────┬─────────┐
+│ (index) │ scenario                     │ answerRate   │ totalDialed │ connected │ utilizationPct │ pacingDecisions         │ safetyDecisions                     │ ratio   │
+├─────────┼──────────────────────────────┼──────────────┼─────────────┼───────────┼────────────────┼─────────────────────────┼─────────────────────────────────────┼─────────┤
+│ 0       │ 'Scenario A (Low AR)'        │ '20%'        │ 138         │ 17        │ '85.0%'        │ 'Prop: 323, Alloc: 138' │ 'REDUCE: 15'                        │ '2.34x' │
+│ 1       │ 'Scenario B (Balanced)'      │ '50%'        │ 27          │ 20        │ '100.0%'       │ 'Prop: 46, Alloc: 27'   │ 'APPROVE: 1, REDUCE: 3, REJECT: 11' │ '1.70x' │
+│ 2       │ 'Scenario C (High AR)'       │ '70%'        │ 28          │ 20        │ '100.0%'       │ 'Prop: 50, Alloc: 28'   │ 'APPROVE: 3, REDUCE: 3, REJECT: 9'  │ '1.79x' │
+│ 3       │ 'Scenario D (Dynamic Shift)' │ '70% -> 10%' │ 29          │ 20        │ '100.0%'       │ 'Prop: 48, Alloc: 29'   │ 'APPROVE: 2, REDUCE: 3, REJECT: 10' │ '1.66x' │
+└─────────┴──────────────────────────────┴──────────────┴─────────────┴───────────┴────────────────┴─────────────────────────┴─────────────────────────────────────┴─────────┘
+
+Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
+
+┌─────────┬───────────────┬───────────────────┬─────────────────────┬───────────┬─────────────────────┬──────────────┬─────────────────┐
+│ (index) │ agentPoolSize │ concurrentWorkers │ totalReservationOps │ elapsedMs │ throughputOpsPerSec │ avgLatencyMs │ casConflictRate │
+├─────────┼───────────────┼───────────────────┼─────────────────────┼───────────┼─────────────────────┼──────────────┼─────────────────┤
+│ 0       │ 100           │ 4                 │ 500                 │ 15        │ 32709               │ 0.031        │ '80.4%'         │
+│ 1       │ 1000          │ 16                │ 2000                │ 100       │ 19935               │ 0.050        │ '57.0%'         │
+│ 2       │ 10000         │ 64                │ 5000                │ 330       │ 15153               │ 0.066        │ '21.3%'         │
+└─────────┴───────────────┴───────────────────┴─────────────────────┴───────────┴─────────────────────┴──────────────┴─────────────────┘
+
+7) Scale Analysis: Bottleneck & Remediation
+
+   1) 100 -> 1,000 Agents: Sub-millisecond latency ($0.031\text{ms} \to 0.050\text{ms}$).
+   2) 1,000 -> 10,000 Agents: Throughput drops to $15,153\text{ ops/sec}$ due to SQLite WAL single-writer lock serialization.
+   3) Remediation: Migrate the state store to PostgreSQL using row-level locking:
+
+    SELECT id FROM agents 
+    WHERE status = 'AVAILABLE' 
+    LIMIT @batchSize 
+    FOR UPDATE SKIP LOCKED;
+
+8) What I'd Do Differently With Another Week
+
+    1) Implement Erlang-C wait probability distributions to model queue dynamics during call holding periods.
+    2) Build an active-active PostgreSQL adapter with FOR UPDATE SKIP LOCKED to dynamically toggle between embedded SQLite and distributed Postgres stores.
+    
+
+### Final Push Command
+
+After saving the file, push it to GitHub:
+
+```powershell
+git add README.md
+git commit -m "docs: finalize README.md with clean formatting and failure scenario matrix"
+git push origin main
