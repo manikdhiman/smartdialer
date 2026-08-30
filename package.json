@@ -5,7 +5,10 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "simulate": "npx tsx scripts/simulate.ts",
+    "loadtest": "npx tsx scripts/loadtest.ts",
+    "chaos": "npx tsx scripts/chaos.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3"
