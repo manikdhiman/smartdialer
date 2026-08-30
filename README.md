@@ -8,7 +8,7 @@ A high-concurrency SmartDialer engine for collections contact centers featuring 
 
 > **"How would you build a SmartDialer that gets as much of the utilization benefit of predictive dialing as possible, while retaining the deterministic safety characteristics of progressive dialing?"**
 
-We decouple proposal mathematics from dial execution by making the predictive pacing engine strictly advisory and routing all outbound calls through an unbypassable, deterministic **Safety Controller**. The predictive engine computes expected agent turnover and rolling answer rates to propose optimal dial batches, but cannot place calls. The Safety Controller sits directly in front of the allocation layer and unconditionally enforces two non-negotiable boundaries: a **Hard In-Flight Ceiling** ($\text{In-Flight} \le \text{Available Agents} + \text{Buffer}$) and an **Abandonment Circuit Breaker** that immediately falls back to pure $1:1$ progressive dialing for a cooldown window if the rolling abandonment rate exceeds 3%. Under nominal conditions, the system reaps full predictive utilization; under worst-case disruptions (telecom outages, agent drops, answer rate collapse), it mathematically degrades to the deterministic safety of progressive dialing.
+We decouple proposal mathematics from dial execution by making the predictive pacing engine strictly advisory and routing all outbound calls through an unbypassable, deterministic **Safety Controller**. The predictive engine computes expected agent turnover and rolling answer rates to propose optimal dial batches, but cannot place calls. The Safety Controller sits directly in front of the allocation layer and unconditionally enforces two non-negotiable boundaries: a **Hard In-Flight Ceiling** (In-Flight ≤ Available Agents + Buffer) and an **Abandonment Circuit Breaker** that immediately falls back to pure 1:1 progressive dialing for a cooldown window if the rolling abandonment rate exceeds 3%. Under nominal conditions, the system reaps full predictive utilization; under worst-case disruptions (telecom outages, agent drops, answer rate collapse), it mathematically degrades to the deterministic safety of progressive dialing.
 
 ---
 
@@ -56,16 +56,13 @@ smartdialer/
 │   ├── loadtest.ts              # Scale benchmark (100 -> 10,000 agents)
 │   └── chaos.ts                 # CLI chaos injector
 └── test/                        # 8 test suites covering 29 unit, race & chaos tests
-
-4) Failure Scenarios Coverage
-
-All five failure scenarios specified in the brief have dedicated, isolated test suites and runnable chaos demonstrations:
-
-## Failure Scenarios Coverage
-
-Each scenario from the assignment brief is demonstrated with a dedicated test and/or a live chaos run.
+```
 
 ---
+
+## 4. Failure Scenarios Coverage
+
+All five failure scenarios specified in the brief have dedicated, isolated test suites and runnable chaos demonstrations.
 
 ### 1. Worker Crash Mid-Allocation
 **Scenario:** Agent reserved → lead reserved → call initiated → worker crashes.
@@ -111,28 +108,35 @@ Each scenario from the assignment brief is demonstrated with a dedicated test an
 > ingested in real time — each line prints `APPLIED`, `REJECTED — DUPLICATE`, or
 > `REJECTED — OUT_OF_ORDER` as it happens.
 
-5) Quickstart & Commands
+---
 
-    Prerequisites
-    Node.js >= 22.0.0
-    npm >= 10.0.0
+## 5. Quickstart & Commands
 
-    # Run All 29 Unit & Chaos Tests
-    npm test
+**Prerequisites**
+- Node.js >= 22.0.0
+- npm >= 10.0.0
 
-    # Run Simulation Across Scenarios A–D
-    npm run simulate
+```bash
+# Run All 29 Unit & Chaos Tests
+npm test
 
-    # Run Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
-    npm run loadtest
+# Run Simulation Across Scenarios A–D
+npm run simulate
 
-    # Run Live Provider B Chaos Demonstration
-    npm run chaos
+# Run Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
+npm run loadtest
 
-6) Simulation & Benchmark Results
+# Run Live Provider B Chaos Demonstration
+npm run chaos
+```
 
-    Scenarios A–D Simulation Output
+---
 
+## 6. Simulation & Benchmark Results
+
+### Scenarios A–D Simulation Output
+
+```
 ┌─────────┬──────────────────────────────┬──────────────┬─────────────┬───────────┬────────────────┬─────────────────────────┬─────────────────────────────────────┬─────────┐
 │ (index) │ scenario                     │ answerRate   │ totalDialed │ connected │ utilizationPct │ pacingDecisions         │ safetyDecisions                     │ ratio   │
 ├─────────┼──────────────────────────────┼──────────────┼─────────────┼───────────┼────────────────┼─────────────────────────┼─────────────────────────────────────┼─────────┤
@@ -141,9 +145,11 @@ Each scenario from the assignment brief is demonstrated with a dedicated test an
 │ 2       │ 'Scenario C (High AR)'       │ '70%'        │ 28          │ 20        │ '100.0%'       │ 'Prop: 50, Alloc: 28'   │ 'APPROVE: 3, REDUCE: 3, REJECT: 9'  │ '1.79x' │
 │ 3       │ 'Scenario D (Dynamic Shift)' │ '70% -> 10%' │ 29          │ 20        │ '100.0%'       │ 'Prop: 48, Alloc: 29'   │ 'APPROVE: 2, REDUCE: 3, REJECT: 10' │ '1.66x' │
 └─────────┴──────────────────────────────┴──────────────┴─────────────┴───────────┴────────────────┴─────────────────────────┴─────────────────────────────────────┴─────────┘
+```
 
-Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
+### Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
 
+```
 ┌─────────┬───────────────┬───────────────────┬─────────────────────┬───────────┬─────────────────────┬──────────────┬─────────────────┐
 │ (index) │ agentPoolSize │ concurrentWorkers │ totalReservationOps │ elapsedMs │ throughputOpsPerSec │ avgLatencyMs │ casConflictRate │
 ├─────────┼───────────────┼───────────────────┼─────────────────────┼───────────┼─────────────────────┼──────────────┼─────────────────┤
@@ -151,29 +157,26 @@ Scale Benchmark (100 -> 1,000 -> 10,000 Agents)
 │ 1       │ 1000          │ 16                │ 2000                │ 100       │ 19935               │ 0.050        │ '57.0%'         │
 │ 2       │ 10000         │ 64                │ 5000                │ 330       │ 15153               │ 0.066        │ '21.3%'         │
 └─────────┴───────────────┴───────────────────┴─────────────────────┴───────────┴─────────────────────┴──────────────┴─────────────────┘
+```
 
-7) Scale Analysis: Bottleneck & Remediation
+---
 
-   1) 100 -> 1,000 Agents: Sub-millisecond latency ($0.031\text{ms} \to 0.050\text{ms}$).
-   2) 1,000 -> 10,000 Agents: Throughput drops to $15,153\text{ ops/sec}$ due to SQLite WAL single-writer lock serialization.
-   3) Remediation: Migrate the state store to PostgreSQL using row-level locking:
+## 7. Scale Analysis: Bottleneck & Remediation
 
-    SELECT id FROM agents 
-    WHERE status = 'AVAILABLE' 
-    LIMIT @batchSize 
-    FOR UPDATE SKIP LOCKED;
+1. **100 → 1,000 Agents:** Sub-millisecond latency (0.031ms → 0.050ms).
+2. **1,000 → 10,000 Agents:** Throughput drops to 15,153 ops/sec due to SQLite WAL single-writer lock serialization.
+3. **Remediation:** Migrate the state store to PostgreSQL using row-level locking:
 
-8) What I'd Do Differently With Another Week
+```sql
+SELECT id FROM agents
+WHERE status = 'AVAILABLE'
+LIMIT @batchSize
+FOR UPDATE SKIP LOCKED;
+```
 
-    1) Implement Erlang-C wait probability distributions to model queue dynamics during call holding periods.
-    2) Build an active-active PostgreSQL adapter with FOR UPDATE SKIP LOCKED to dynamically toggle between embedded SQLite and distributed Postgres stores.
-    
+---
 
-### Final Push Command
+## 8. What I'd Do Differently With Another Week
 
-After saving the file, push it to GitHub:
-
-```powershell
-git add README.md
-git commit -m "docs: finalize README.md with clean formatting and failure scenario matrix"
-git push origin main
+1. Implement Erlang-C wait probability distributions to model queue dynamics during call holding periods.
+2. Build an active-active PostgreSQL adapter with `FOR UPDATE SKIP LOCKED` to dynamically toggle between embedded SQLite and distributed Postgres stores.
