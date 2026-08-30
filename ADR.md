@@ -84,3 +84,21 @@ The `SafetyController` is the sole authorized writer of approved call counts. It
 ### Trade-offs & Consequences
 - **Positive:** Mathematically proves that the system can never perform worse than deterministic progressive dialing in worst-case failure modes.
 - **Trade-off:** High bursts of agent availability are clamped to the buffer window rather than unboundedly spiked.
+
+
+## ADR-006: Explainable Erlang-Inspired Predictive Pacing
+
+### Status: Accepted (Phase 6)
+
+### Context
+Call centers maximize agent utilization by initiating calls before agents become idle. Complex ML models operate as black boxes, making it difficult to debug dial rates during audit inquiries or sudden market shifts.
+
+### Decision
+The predictive pacing engine uses a closed-form, deterministic formula:
+`Proposed = ceil((availableAgents + connectedCalls * (setupTime / avgTalkTime)) * (1 / max(answerRate, floor))) - ringingCalls`.
+Every proposal exports full mathematical metadata for direct observability.
+
+### Trade-offs & Consequences
+- **Positive:** 100% explainable in regulatory audits and real-time logs.
+- **Positive:** Low CPU overhead; can run every sub-second tick with zero inference latency.
+- **Trade-off:** Assumes call setup time and talk times follow rolling averages.
