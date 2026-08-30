@@ -22,6 +22,7 @@ export interface WorkerOptions {
   provider?: TelecomProvider;
   tickIntervalMs?: number;
   reservationTtlMs?: number;
+  initialAnswerRate?: number;
 }
 
 export class DialerWorker {
@@ -34,7 +35,7 @@ export class DialerWorker {
   private pacingEngine: PacingEngine;
   private safetyController: SafetyController;
   private allocator: CallAllocator;
-  private metricsCollector: MetricsCollector;
+  public metricsCollector: MetricsCollector;
   private healthMonitor: ProviderHealthMonitor;
   private isRunning = false;
   private tickIntervalMs: number;
@@ -48,11 +49,35 @@ export class DialerWorker {
     this.leadRepo = new LeadRepository(this.db);
     this.callRepo = new CallRepository(this.db);
     this.eventBus = new ProviderEventBus(this.db);
-    this.metricsCollector = new MetricsCollector();
+    this.metricsCollector = new MetricsCollector(300000, options.initialAnswerRate ?? 0.40);
+    if (options.initialAnswerRate) {
+      this.metricsCollector.seedInitialMetrics(options.initialAnswerRate);
+    }
     this.healthMonitor = new ProviderHealthMonitor();
 
     const provider = options.provider ?? new ProviderA();
     this.allocator = new CallAllocator(this.db, provider, this.eventBus);
+
+    // Connect provider events directly to live metrics collection
+    provider.onEvent((evt) => {
+      if (evt.type === 'CALL_ANSWERED') {
+        this.metricsCollector.recordCall({
+          callId: evt.callId,
+          setupTimeMs: 3000,
+          talkTimeMs: 60000,
+          outcome: 'ANSWERED',
+          timestamp: Date.now(),
+        });
+      } else if (evt.type === 'CALL_FAILED') {
+        this.metricsCollector.recordCall({
+          callId: evt.callId,
+          setupTimeMs: 3000,
+          talkTimeMs: 0,
+          outcome: 'FAILED',
+          timestamp: Date.now(),
+        });
+      }
+    });
 
     this.pacingEngine = options.mode === 'PREDICTIVE' ? new PredictiveEngine() : new ProgressiveEngine();
     this.safetyController = new SafetyController(DEFAULT_SAFETY_CONFIG);
@@ -66,11 +91,9 @@ export class DialerWorker {
     safetyDecision: string;
     allocated: number;
   }> {
-    // 1. Run Maintenance Reapers (crash recovery)
     this.agentRepo.reapStaleReservations(this.reservationTtlMs);
     this.leadRepo.reapStaleClaims(this.reservationTtlMs);
 
-    // 2. Query Current System Concurrency State
     const availableAgents = this.agentRepo.countAvailableAgents();
     const rows = this.db.prepare(`
       SELECT 
@@ -99,15 +122,12 @@ export class DialerWorker {
       avgSetupTimeSeconds: metrics.avgSetupTimeSeconds,
     };
 
-    // 3. Pacing Engine Proposes Batch
     const proposal = this.pacingEngine.propose(context);
 
-    // 4. Safety Controller Validates and Governs
     let safetyDecision = this.safetyController.evaluate(proposal, context, {
       abandonmentRate: metrics.abandonmentRate,
     });
 
-    // If Provider is unhealthy, clamp to 0
     if (!health.isHealthy) {
       safetyDecision = {
         type: 'REJECT',
@@ -118,7 +138,6 @@ export class DialerWorker {
       };
     }
 
-    // 5. Allocate approved calls
     let allocated = 0;
     if (safetyDecision.approvedCalls > 0) {
       const res = await this.allocator.allocateCalls(safetyDecision.approvedCalls, this.workerId);

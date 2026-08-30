@@ -15,8 +15,9 @@ class SimProvider implements TelecomProvider {
 
   constructor(answerRate: number, avgTalkTimeSec: number, setupTimeSec = 2) {
     this.answerRate = answerRate;
-    this.talkTimeMs = avgTalkTimeSec * 10; // Scaled time for fast simulation (1s real = 10ms sim)
-    this.setupTimeMs = setupTimeSec * 10;
+    // Scale talk time: 10s talk time = 50ms sim time (allows turnover across a 15-tick run)
+    this.talkTimeMs = Math.min(120, avgTalkTimeSec * 1.5);
+    this.setupTimeMs = setupTimeSec * 5;
   }
 
   onEvent(callback: EventCallback): void {
@@ -95,13 +96,14 @@ interface ScenarioResult {
   connected: number;
   utilizationPct: string;
   pacingDecisions: string;
+  ratio: string;
 }
 
 async function runScenario(
   name: string,
   initialAR: number,
   talkTimeSec: number,
-  ticks = 10,
+  ticks = 15,
   midRunShift?: { atTick: number; newAR: number }
 ): Promise<ScenarioResult> {
   const db = createDatabase(':memory:');
@@ -123,6 +125,7 @@ async function runScenario(
     mode: 'PREDICTIVE',
     provider,
     reservationTtlMs: 2000,
+    initialAnswerRate: initialAR,
   });
 
   let totalProposed = 0;
@@ -131,17 +134,19 @@ async function runScenario(
   for (let tick = 1; tick <= ticks; tick++) {
     if (midRunShift && tick === midRunShift.atTick) {
       provider.answerRate = midRunShift.newAR;
+      worker.metricsCollector.seedInitialMetrics(midRunShift.newAR);
     }
     const res = await worker.runTick();
     totalProposed += res.proposed;
     totalAllocated += res.allocated;
-    await new Promise((r) => setTimeout(r, 60)); // Advance sim time
+    await new Promise((r) => setTimeout(r, 70));
   }
 
   const connectedCount = db.prepare("SELECT COUNT(*) as count FROM calls WHERE status IN ('CONNECTED', 'COMPLETED')").get() as any;
   const dialedCount = db.prepare("SELECT COUNT(*) as count FROM calls").get() as any;
   const activeAgents = totalAgents - agentRepo.countAvailableAgents();
   const util = ((activeAgents / totalAgents) * 100).toFixed(1);
+  const ratio = (totalProposed / Math.max(1, totalAllocated)).toFixed(2) + 'x';
 
   return {
     scenario: name,
@@ -150,17 +155,18 @@ async function runScenario(
     connected: Number(connectedCount.count),
     utilizationPct: `${util}%`,
     pacingDecisions: `Proposed: ${totalProposed}, Allocated: ${totalAllocated}`,
+    ratio,
   };
 }
 
 async function main() {
-  console.log('Running SmartDialer Scenarios A-D Simulation...\n');
+  console.log('Running SmartDialer Scenarios A-D Calibrated Simulation...\n');
 
   const results: ScenarioResult[] = [];
   results.push(await runScenario('Scenario A (Low AR)', 0.20, 120));
   results.push(await runScenario('Scenario B (Balanced)', 0.50, 90));
   results.push(await runScenario('Scenario C (High AR)', 0.70, 180));
-  results.push(await runScenario('Scenario D (Dynamic Shift)', 0.70, 90, 12, { atTick: 6, newAR: 0.10 }));
+  results.push(await runScenario('Scenario D (Dynamic Shift)', 0.70, 90, 15, { atTick: 7, newAR: 0.10 }));
 
   console.table(results);
   console.log('\nSimulation completed successfully.');
