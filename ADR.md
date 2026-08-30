@@ -65,3 +65,22 @@ Pacing engines (`PacingEngine` interface) are pure advisors returning proposal D
 ### Trade-offs & Consequences
 - **Positive:** Pacing logic is easily unit tested with mock inputs.
 - **Positive:** Progressive and predictive strategies are plug-and-play interchangeable without rewriting allocation transactions.
+
+
+## ADR-005: Safety Controller as the Unbypassable Dialing Boundary
+
+### Status: Accepted (Phase 5)
+
+### Context
+Predictive pacing algorithms maximize agent utilization by dialing ahead of expected agent availability. However, mathematical misestimations, network delays, or abrupt answer rate shifts can produce compliance-violating abandonment spikes or dial storms.
+
+### Decision
+The `SafetyController` is the sole authorized writer of approved call counts. It unconditionally enforces:
+1. **Hard In-Flight Ceiling**: `(DIALING + RINGING) <= availableAgents + buffer`.
+2. **Global Concurrency Ceiling**: `totalInFlight <= maxConcurrentGlobal`.
+3. **Abandonment Circuit Breaker**: If rolling abandonment rate > 3%, the system trips into a 30s progressive fallback cooldown.
+`PacingEngine` cannot place calls or disable the Safety Controller.
+
+### Trade-offs & Consequences
+- **Positive:** Mathematically proves that the system can never perform worse than deterministic progressive dialing in worst-case failure modes.
+- **Trade-off:** High bursts of agent availability are clamped to the buffer window rather than unboundedly spiked.
