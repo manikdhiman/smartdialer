@@ -13,6 +13,7 @@ export interface ProviderBConfig {
 export class ProviderB implements TelecomProvider {
   readonly name = 'ProviderB';
   private listeners: EventCallback[] = [];
+  private activeTimers: Set<NodeJS.Timeout> = new Set();
 
   constructor(
     private config: ProviderBConfig = {
@@ -28,6 +29,14 @@ export class ProviderB implements TelecomProvider {
     this.listeners.push(callback);
   }
 
+  destroy(): void {
+    for (const timer of this.activeTimers) {
+      clearTimeout(timer);
+    }
+    this.activeTimers.clear();
+    this.listeners = [];
+  }
+
   private emit(event: ProviderEvent): void {
     const shouldDuplicate = Math.random() < (this.config.duplicateRate ?? 0.2);
 
@@ -35,12 +44,15 @@ export class ProviderB implements TelecomProvider {
       try {
         listener(event);
         if (shouldDuplicate) {
-          // Emit duplicate identical event after small delay
-          setTimeout(() => listener(event), 10);
+          const dupTimer = setTimeout(() => {
+            this.activeTimers.delete(dupTimer);
+            try {
+              listener(event);
+            } catch {}
+          }, 10);
+          this.activeTimers.add(dupTimer);
         }
-      } catch (err) {
-        console.error(`[ProviderB] Listener error:`, err);
-      }
+      } catch (err) {}
     }
   }
 
@@ -48,7 +60,6 @@ export class ProviderB implements TelecomProvider {
     const providerCallId = `prv_b_${randomUUID().slice(0, 8)}`;
     const now = Date.now();
 
-    // 1. INITIATED (seq 1)
     this.emit({
       eventId: `evt_${randomUUID()}`,
       callId,
@@ -65,7 +76,8 @@ export class ProviderB implements TelecomProvider {
         (this.config.minSetupMs ?? 50)
     );
 
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
+      this.activeTimers.delete(t1);
       if (isFailure) {
         this.emit({
           eventId: `evt_${randomUUID()}`,
@@ -80,7 +92,6 @@ export class ProviderB implements TelecomProvider {
       }
 
       if (shouldReorder) {
-        // Chaos: Emit ANSWERED (seq 3) BEFORE RINGING (seq 2)
         this.emit({
           eventId: `evt_${randomUUID()}`,
           callId,
@@ -90,18 +101,19 @@ export class ProviderB implements TelecomProvider {
           timestamp: Date.now(),
         });
 
-        setTimeout(() => {
+        const t2 = setTimeout(() => {
+          this.activeTimers.delete(t2);
           this.emit({
             eventId: `evt_${randomUUID()}`,
             callId,
             providerCallId,
             type: 'CALL_RINGING',
-            sequenceNumber: 2, // Out-of-order sequence
+            sequenceNumber: 2,
             timestamp: Date.now(),
           });
         }, 15);
+        this.activeTimers.add(t2);
       } else {
-        // Normal progression
         this.emit({
           eventId: `evt_${randomUUID()}`,
           callId,
@@ -111,7 +123,8 @@ export class ProviderB implements TelecomProvider {
           timestamp: Date.now(),
         });
 
-        setTimeout(() => {
+        const t3 = setTimeout(() => {
+          this.activeTimers.delete(t3);
           this.emit({
             eventId: `evt_${randomUUID()}`,
             callId,
@@ -121,8 +134,10 @@ export class ProviderB implements TelecomProvider {
             timestamp: Date.now(),
           });
         }, setupDelay / 2);
+        this.activeTimers.add(t3);
       }
     }, setupDelay);
+    this.activeTimers.add(t1);
 
     return { providerCallId };
   }

@@ -5,12 +5,13 @@ import { randomUUID } from 'node:crypto';
 export interface ProviderAConfig {
   minSetupMs?: number;
   maxSetupMs?: number;
-  failureRate?: number; // 0.0 to 1.0
+  failureRate?: number;
 }
 
 export class ProviderA implements TelecomProvider {
   readonly name = 'ProviderA';
   private listeners: EventCallback[] = [];
+  private activeTimers: Set<NodeJS.Timeout> = new Set();
 
   constructor(private config: ProviderAConfig = { minSetupMs: 20, maxSetupMs: 50, failureRate: 0.02 }) {}
 
@@ -18,12 +19,20 @@ export class ProviderA implements TelecomProvider {
     this.listeners.push(callback);
   }
 
+  destroy(): void {
+    for (const timer of this.activeTimers) {
+      clearTimeout(timer);
+    }
+    this.activeTimers.clear();
+    this.listeners = [];
+  }
+
   private emit(event: ProviderEvent): void {
     for (const listener of this.listeners) {
       try {
         listener(event);
       } catch (err) {
-        console.error(`[ProviderA] Listener error:`, err);
+        // Listener drop guard
       }
     }
   }
@@ -32,7 +41,6 @@ export class ProviderA implements TelecomProvider {
     const providerCallId = `prv_a_${randomUUID().slice(0, 8)}`;
     const now = Date.now();
 
-    // 1. INITIATED (seq 1)
     this.emit({
       eventId: `evt_${randomUUID()}`,
       callId,
@@ -48,7 +56,8 @@ export class ProviderA implements TelecomProvider {
         (this.config.minSetupMs ?? 20)
     );
 
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
+      this.activeTimers.delete(t1);
       if (isFailure) {
         this.emit({
           eventId: `evt_${randomUUID()}`,
@@ -62,7 +71,6 @@ export class ProviderA implements TelecomProvider {
         return;
       }
 
-      // 2. RINGING (seq 2)
       this.emit({
         eventId: `evt_${randomUUID()}`,
         callId,
@@ -72,8 +80,8 @@ export class ProviderA implements TelecomProvider {
         timestamp: Date.now(),
       });
 
-      // 3. ANSWERED (seq 3)
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
+        this.activeTimers.delete(t2);
         this.emit({
           eventId: `evt_${randomUUID()}`,
           callId,
@@ -83,8 +91,8 @@ export class ProviderA implements TelecomProvider {
           timestamp: Date.now(),
         });
 
-        // 4. CONNECTED (seq 4)
-        setTimeout(() => {
+        const t3 = setTimeout(() => {
+          this.activeTimers.delete(t3);
           this.emit({
             eventId: `evt_${randomUUID()}`,
             callId,
@@ -94,8 +102,11 @@ export class ProviderA implements TelecomProvider {
             timestamp: Date.now(),
           });
         }, 10);
+        this.activeTimers.add(t3);
       }, setupDelay);
+      this.activeTimers.add(t2);
     }, setupDelay);
+    this.activeTimers.add(t1);
 
     return { providerCallId };
   }
