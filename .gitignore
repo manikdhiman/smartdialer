@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build and test outputs
+dist/
+coverage/
+*.log
+
+# SQLite database and lock files
+*.db
+*.db-wal
+*.db-shm
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
