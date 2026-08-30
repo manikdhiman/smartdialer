@@ -6,9 +6,10 @@ A high-concurrency SmartDialer engine for collections contact centers featuring 
 
 ## 1. Final Design Answer
 
-> **"How would you build a SmartDialer that gets as much of the utilization benefit of predictive dialing as possible, while retaining the deterministic safety characteristics of progressive dialing?"**
+> "How would you build a SmartDialer that gets as much of the utilization benefit of predictive dialing as possible, while retaining the deterministic safety characteristics of progressive dialing?"
 
 The key idea is to keep the predictive engine's job purely advisory — it only ever suggests how many calls to dial next, based on current agent availability, answer rate, and average call duration. It never places a call itself. Every suggestion passes through a Safety Controller that sits between the pacing logic and the actual dialing, and that controller is the only part of the system allowed to trigger a real call. It enforces two hard rules no matter what the predictive engine suggests: the number of calls in progress can never exceed available agents plus a small buffer, and if the abandonment rate ever crosses 3%, the whole system automatically falls back to plain 1:1 progressive dialing until things stabilize. So when conditions are healthy, the system gets the utilization benefits of predictive dialing, and when something goes wrong — a bad prediction, an agent drop, a provider outage — it behaves exactly as safely as progressive dialing, because the safety logic doesn't depend on the prediction being correct.
+
 ---
 
 ## 2. Key System Invariants
